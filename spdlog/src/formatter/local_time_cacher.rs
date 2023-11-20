@@ -13,12 +13,12 @@ pub(crate) static LOCAL_TIME_CACHER: Lazy<SpinMutex<LocalTimeCacher>> =
     Lazy::new(|| SpinMutex::new(LocalTimeCacher::new()));
 
 #[derive(Clone)]
-pub(crate) struct LocalTimeCacher {
+pub struct LocalTimeCacher {
     stored_key: CacheKey,
     cache_values: Option<CacheValues>,
 }
 
-pub(crate) struct TimeDate<'a> {
+pub struct TimeDate<'a> {
     cached: &'a mut CacheValues,
     nanosecond: u32,
     millisecond: u32,
@@ -65,7 +65,7 @@ pub(crate) struct MultiName<T> {
 
 impl LocalTimeCacher {
     #[must_use]
-    fn new() -> LocalTimeCacher {
+    pub fn new() -> LocalTimeCacher {
         LocalTimeCacher {
             stored_key: CacheKey::NonLeap(0),
             cache_values: None,
@@ -73,7 +73,7 @@ impl LocalTimeCacher {
     }
 
     #[must_use]
-    pub(crate) fn get(&mut self, system_time: SystemTime) -> TimeDate {
+    pub fn get(&mut self, system_time: SystemTime) -> TimeDate {
         self.get_inner(system_time.into())
     }
 
@@ -144,7 +144,7 @@ impl<'a> TimeDate<'a> {
     // There is nothing like `RefMut::downgrade()` for now, just keep in mind don't
     // modify the return value :)
     #[must_use]
-    pub(crate) fn full_second_str(&self) -> RefMut<'_, str> {
+    pub fn full_second_str(&self) -> RefMut<'_, str> {
         RefMut::map(self.cached.full_second_str.borrow_mut(), |opt| {
             opt.get_or_insert_with(|| {
                 // `local_time.format("%Y-%m-%d %H:%M:%S")` is slower than this way
@@ -257,7 +257,7 @@ impl<'a> TimeDate<'a> {
     }
 
     #[must_use]
-    pub(crate) fn millisecond(&self) -> u32 {
+    pub fn millisecond(&self) -> u32 {
         self.millisecond
     }
 

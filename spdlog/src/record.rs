@@ -250,6 +250,12 @@ impl<'a> RecordBuilder<'a> {
         self
     }
 
+    #[must_use]
+    pub(crate) fn time(mut self, time: SystemTime) -> Self {
+        self.record.inner.to_mut().time = time;
+        self
+    }
+
     /// Builds a [`Record`].
     #[must_use]
     pub(crate) fn build(self) -> Record<'a> {

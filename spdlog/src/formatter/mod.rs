@@ -10,7 +10,7 @@ mod full_formatter;
     all(doc, not(doctest))
 ))]
 mod journald_formatter;
-mod local_time_cacher;
+pub mod local_time_cacher;
 mod pattern_formatter;
 
 use std::ops::Range;
@@ -45,7 +45,7 @@ pub trait Formatter: Send + Sync {
 /// Extra information for formatted text.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct FmtExtraInfo {
-    style_range: Option<Range<usize>>,
+    pub style_range: Option<Range<usize>>,
 }
 
 impl FmtExtraInfo {
