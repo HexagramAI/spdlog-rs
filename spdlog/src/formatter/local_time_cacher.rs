@@ -22,6 +22,7 @@ pub struct TimeDate<'a> {
     cached: &'a mut CacheValues,
     nanosecond: u32,
     millisecond: u32,
+    microsecond: u32,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -87,7 +88,10 @@ impl LocalTimeCacher {
         } else {
             nanosecond
         };
-        let millisecond = reduced_nanosecond / 1_000_000;
+
+        let microsecond = reduced_nanosecond / 1_000;
+        let millisecond = microsecond / 1_000;
+        let microsecond = microsecond % 1_000;
 
         let cache_key = CacheKey::new(&utc_time, is_leap_second);
         if self.cache_values.is_none() || self.stored_key != cache_key {
@@ -99,6 +103,7 @@ impl LocalTimeCacher {
             self.cache_values.as_mut().unwrap(),
             reduced_nanosecond,
             millisecond,
+            microsecond,
         )
     }
 }
@@ -131,11 +136,12 @@ macro_rules! impl_cache_fields_str_getter {
 
 impl<'a> TimeDate<'a> {
     #[must_use]
-    fn new(cached: &'a mut CacheValues, nanosecond: u32, millisecond: u32) -> Self {
+    fn new(cached: &'a mut CacheValues, nanosecond: u32, millisecond: u32, microsecond: u32) -> Self {
         Self {
             cached,
             nanosecond,
             millisecond,
+            microsecond,
         }
     }
 
@@ -257,12 +263,15 @@ impl<'a> TimeDate<'a> {
     }
 
     #[must_use]
+    #[inline(always)]
     pub fn millisecond(&self) -> u32 {
         self.millisecond
     }
 
+    #[inline(always)]
     pub fn microsecond(&self) -> u32 {
-        (self.nanosecond / 1000) % 1000
+        // (self.nanosecond / 1000) % 1000
+        self.microsecond
     }
 
     #[must_use]
