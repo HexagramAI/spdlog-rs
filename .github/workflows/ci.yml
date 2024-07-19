@@ -43,7 +43,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ['ubuntu-latest', 'windows-latest', 'macos-latest']
-        fn_features: ['', 'log native libsystemd multi-thread']
+        fn_features: ['', 'log native libsystemd multi-thread runtime-pattern']
         cfg_feature: ['', 'flexible-string', 'source-location']
     runs-on: ${{ matrix.os }}
     steps:
@@ -55,7 +55,7 @@ jobs:
     - name: Restore cargo caches
       uses: Swatinem/rust-cache@v1
     - name: Run tests
-      run: cargo test --features "${{ env.fn_features }} ${{ matrix.cfg_feature }}" --verbose
+      run: cargo test --features "${{ matrix.fn_features }} ${{ matrix.cfg_feature }}" --verbose
 
   clippy:
     strategy:
@@ -125,9 +125,12 @@ jobs:
     - name: Run rustdoc
       run: |
         cd spdlog
-        cargo +nightly rustdoc --all-features --verbose -- -D warnings
+        # The reason for allowing lint `unexpected_cfgs` not in `build.rs` or `Cargo.toml` but only in CI is that we need to keep MSRV
+        cargo +nightly rustdoc --verbose -- -D warnings -A unexpected_cfgs -A rustdoc::broken-intra-doc-links
+        cargo +nightly rustdoc --all-features --verbose -- -D warnings -A unexpected_cfgs
         cd ../spdlog-macros
-        cargo +nightly rustdoc --all-features --verbose -- -D warnings
+        cargo +nightly rustdoc --verbose -- -D warnings -A unexpected_cfgs -A rustdoc::broken-intra-doc-links
+        cargo +nightly rustdoc --all-features --verbose -- -D warnings -A unexpected_cfgs
 
   check-msrv:
     strategy:

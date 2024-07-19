@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 pub use std::sync::{
     Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak,
 };
@@ -27,6 +29,7 @@ pub trait RwLockExtend<'a> {
     type ReadReturn;
     type WriteReturn;
 
+    #[allow(dead_code)]
     #[must_use]
     fn read_expect(&'a self) -> Self::ReadReturn;
 

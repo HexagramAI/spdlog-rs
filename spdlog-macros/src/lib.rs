@@ -5,35 +5,29 @@
 //!
 //! [`spdlog-rs`]: https://crates.io/crates/spdlog-rs
 
-mod helper;
-mod parse;
-mod synthesis;
+mod pattern;
 
 use proc_macro::TokenStream;
-
-use crate::{
-    parse::Pattern,
-    synthesis::{PatternFormatter, PatternFormatterKind, Synthesiser},
-};
+use proc_macro2::TokenStream as TokenStream2;
+use spdlog_internal::pattern_parser::Result;
 
 #[proc_macro]
 pub fn pattern(input: TokenStream) -> TokenStream {
-    let pat = syn::parse_macro_input!(input as Pattern);
+    let pattern = syn::parse_macro_input!(input);
+    into_or_error(pattern::pattern_impl(pattern))
+}
 
-    let mut synthesiser = Synthesiser::with_builtin_formatters();
-    for (name, formatter) in pat.custom_pat_mapping.mapping_pairs {
-        if let Err(err) = synthesiser.add_formatter_mapping(
-            name.to_string(),
-            PatternFormatter {
-                factory_path: formatter.0,
-                kind: PatternFormatterKind::Custom,
-            },
-        ) {
-            panic!("{}", err);
-        }
-    }
+#[proc_macro]
+pub fn runtime_pattern(input: TokenStream) -> TokenStream {
+    // We must make this macro a procedural macro because macro cannot match the "$"
+    // token which is used in the custom patterns.
 
-    match synthesiser.synthesis(&pat.template) {
+    let runtime_pattern = syn::parse_macro_input!(input);
+    into_or_error(pattern::runtime_pattern_impl(runtime_pattern))
+}
+
+fn into_or_error(result: Result<TokenStream2>) -> TokenStream {
+    match result {
         Ok(stream) => stream.into(),
         Err(err) => panic!("{}", err),
     }

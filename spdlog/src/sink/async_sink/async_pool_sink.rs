@@ -78,9 +78,21 @@ impl Sink for AsyncPoolSink {
     }
 
     fn flush(&self) -> Result<()> {
-        self.assign_task(Task::Flush {
-            backend: self.clone_backend(),
-        })
+        if crate::IS_TEARING_DOWN.load(Ordering::SeqCst) {
+            // https://github.com/SpriteOvO/spdlog-rs/issues/64
+            //
+            // If the program is tearing down, this will be the final flush. `crossbeam`
+            // uses thread-local internally, which is not supported in `atexit` callback.
+            // This can be bypassed by flushing sinks directly on the current thread, but
+            // before we do that we have to destroy the thread pool to ensure that any
+            // pending log tasks are completed.
+            self.thread_pool.destroy();
+            self.backend.flush()
+        } else {
+            self.assign_task(Task::Flush {
+                backend: self.clone_backend(),
+            })
+        }
     }
 
     /// For [`AsyncPoolSink`], the function performs the same call to all
@@ -181,20 +193,20 @@ pub(crate) struct Backend {
 }
 
 impl Backend {
-    fn log(&self, record: &Record) {
+    fn log(&self, record: &Record) -> Result<()> {
+        let mut result = Ok(());
         for sink in &self.sinks {
-            if let Err(err) = sink.log(record) {
-                self.handle_error(err);
-            }
+            result = Error::push_result(result, sink.log(record));
         }
+        result
     }
 
-    fn flush(&self) {
+    fn flush(&self) -> Result<()> {
+        let mut result = Ok(());
         for sink in &self.sinks {
-            if let Err(err) = sink.flush() {
-                self.handle_error(err);
-            }
+            result = Error::push_result(result, sink.flush());
         }
+        result
     }
 
     fn handle_error(&self, err: Error) {
@@ -219,10 +231,14 @@ impl Task {
     pub(crate) fn exec(self) {
         match self {
             Task::Log { backend, record } => {
-                backend.log(&record.as_ref());
+                if let Err(err) = backend.log(&record.as_ref()) {
+                    backend.handle_error(err)
+                }
             }
             Task::Flush { backend } => {
-                backend.flush();
+                if let Err(err) = backend.flush() {
+                    backend.handle_error(err)
+                }
             }
         }
     }

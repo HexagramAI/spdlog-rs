@@ -31,15 +31,21 @@ use crate::{
 /// ```
 ///
 /// [`AsyncPoolSink`]: crate::sink::AsyncPoolSink
-pub struct ThreadPool {
+pub struct ThreadPool(ArcSwapOption<ThreadPoolInner>);
+
+struct ThreadPoolInner {
     threads: Vec<Option<JoinHandle<()>>>,
     sender: Option<Sender<Task>>,
 }
+
+type Callback = Arc<dyn Fn() + Send + Sync + 'static>;
 
 /// The builder of [`ThreadPool`].
 pub struct ThreadPoolBuilder {
     capacity: usize,
     threads: usize,
+    on_thread_spawn: Option<Callback>,
+    on_thread_finish: Option<Callback>,
 }
 
 struct Worker {
@@ -53,6 +59,8 @@ impl ThreadPool {
         ThreadPoolBuilder {
             capacity: 8192,
             threads: 1,
+            on_thread_spawn: None,
+            on_thread_finish: None,
         }
     }
 
@@ -62,7 +70,8 @@ impl ThreadPool {
     }
 
     pub(super) fn assign_task(&self, task: Task, overflow_policy: OverflowPolicy) -> Result<()> {
-        let sender = self.sender.as_ref().unwrap();
+        let inner = self.0.load();
+        let sender = inner.as_ref().unwrap().sender.as_ref().unwrap();
 
         match overflow_policy {
             OverflowPolicy::Block => sender.send(task).map_err(Error::from_crossbeam_send),
@@ -71,21 +80,28 @@ impl ThreadPool {
                 .map_err(Error::from_crossbeam_try_send),
         }
     }
+
+    pub(super) fn destroy(&self) {
+        if let Some(mut inner) = self.0.swap(None) {
+            // Or use `Arc::into_inner`, but it requires us to bump MSRV.
+            let inner = Arc::get_mut(&mut inner).unwrap();
+
+            // drop our sender, threads will break the loop after receiving and processing
+            // the remaining tasks
+            inner.sender.take();
+
+            for thread in &mut inner.threads {
+                if let Some(thread) = thread.take() {
+                    thread.join().expect("failed to join a thread from pool");
+                }
+            }
+        }
+    }
 }
 
 impl Drop for ThreadPool {
     fn drop(&mut self) {
-        // drop our sender, threads will break the loop after receiving and processing
-        // the remaining tasks
-        self.sender.take();
-
-        for thread in &mut self.threads {
-            thread
-                .take()
-                .unwrap()
-                .join()
-                .expect("failed to join a thread from pool");
-        }
+        self.destroy();
     }
 }
 
@@ -117,6 +133,27 @@ impl ThreadPoolBuilder {
         self
     }
 
+    /// Provide a function that will be called on each thread of the thread pool
+    /// immediately after it is spawned. This can, for example, be used to set
+    /// core affinity for each thread.
+    pub fn on_thread_spawn<F>(&mut self, f: F) -> &mut Self
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        self.on_thread_spawn = Some(Arc::new(f));
+        self
+    }
+
+    /// Provide a function that will be called on each thread of the thread pool
+    /// just before the thread finishes.
+    pub fn on_thread_finish<F>(&mut self, f: F) -> &mut Self
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        self.on_thread_finish = Some(Arc::new(f));
+        self
+    }
+
     /// Builds a [`ThreadPool`].
     pub fn build(&self) -> Result<ThreadPool> {
         if self.capacity < 1 {
@@ -136,13 +173,28 @@ impl ThreadPoolBuilder {
         let mut threads = Vec::new();
         threads.resize_with(self.threads, || {
             let receiver = receiver.clone();
-            Some(thread::spawn(move || Worker { receiver }.run()))
+            let on_thread_spawn = self.on_thread_spawn.clone();
+            let on_thread_finish = self.on_thread_finish.clone();
+
+            Some(thread::spawn(move || {
+                if let Some(f) = on_thread_spawn {
+                    f();
+                }
+
+                Worker { receiver }.run();
+
+                if let Some(f) = on_thread_finish {
+                    f();
+                }
+            }))
         });
 
-        Ok(ThreadPool {
-            threads,
-            sender: Some(sender),
-        })
+        Ok(ThreadPool(ArcSwapOption::new(Some(Arc::new(
+            ThreadPoolInner {
+                threads,
+                sender: Some(sender),
+            },
+        )))))
     }
 }
 

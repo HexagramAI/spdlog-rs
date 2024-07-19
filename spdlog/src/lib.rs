@@ -58,6 +58,16 @@
 //! [open a discussion]. For feature requests or bug reports, please [open an
 //! issue].
 //!
+//! # Overview of features
+//!
+//! - [Compatible with log crate](#compatible-with-log-crate)
+//! - [Asynchronous support](#asynchronous-support)
+//! - [Configured via environment
+//!   variable](#configured-via-environment-variable)
+//! - [Compile-time and runtime pattern
+//!   formatter](#compile-time-and-runtime-pattern-formatter)
+//! - [Compile-time filters](#compile-time-filters)
+//!
 //! # Compatible with log crate
 //!
 //! This is optional and is controlled by crate feature `log`.
@@ -85,7 +95,38 @@
 //!
 //! For more details, see the documentation of [`init_env_level`].
 //!
-//! # Compile time filters
+//! # Compile-time and runtime pattern formatter
+//!
+//! spdlog-rs supports formatting your log records according to a pattern
+//! string. There are 2 ways to construct a pattern:
+//!
+//! - Macro [`pattern!`]: Builds a pattern at compile-time.
+//! - Macro [`runtime_pattern!`]: Builds a pattern at runtime.
+//!
+//! ```
+//! use spdlog::formatter::{pattern, PatternFormatter};
+//! #[cfg(feature = "runtime-pattern")]
+//! use spdlog::formatter::runtime_pattern;
+//! # use spdlog::sink::{Sink, WriteSink};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // This pattern is built at compile-time, the template accepts only a literal string.
+//! let pattern = pattern!("[{date} {time}.{millisecond}] [{level}] {payload}{eol}");
+//!
+//! #[cfg(feature = "runtime-pattern")]
+//! {
+//!     // This pattern is built at runtime, the template accepts a runtime string.
+//!     let input = "[{date} {time}.{millisecond}] [{level}] {payload}{eol}";
+//!     let pattern = runtime_pattern!(input)?;
+//! }
+//!
+//! // Use the compile-time or runtime pattern.
+//! # let your_sink = WriteSink::builder().target(vec![]).build()?;
+//! your_sink.set_formatter(Box::new(PatternFormatter::new(pattern)));
+//! # Ok(()) }
+//! ```
+//!
+//! # Compile-time filters
 //!
 //! Log levels can be statically disabled at compile time via Cargo features.
 //! Log invocations at disabled levels will be skipped and will not even be
@@ -138,6 +179,9 @@
 //!    component requires additional system dependencies, then more granular
 //!    features need to be enabled as well. See the documentation of the
 //!    component for these details.
+//!
+//!  - `runtime-pattern` enables the ability to build patterns with runtime
+//!    template string. See [`RuntimePattern`] for more details.
 //!
 //! # Supported Rust Versions
 //!
@@ -196,6 +240,9 @@
 //! [open an issue]: https://github.com/SpriteOvO/spdlog-rs/issues/new/choose
 //! [log crate]: https://crates.io/crates/log
 //! [Asynchronous combined sink]: sink/index.html#asynchronous-combined-sink
+//! [`pattern!`]: crate::formatter::pattern
+//! [`runtime_pattern!`]: crate::formatter::runtime_pattern
+//! [`RuntimePattern`]: crate::formatter::RuntimePattern
 //! [`FullFormatter`]: crate::formatter::FullFormatter
 //! [`RotatingFileSink`]: crate::sink::RotatingFileSink
 //! [`Formatter`]: crate::formatter::Formatter
@@ -305,9 +352,11 @@ cfg_if! {
 }
 
 #[cfg(not(windows))]
-pub(crate) const EOL: &str = "\n";
+#[doc(hidden)]
+pub const __EOL: &str = "\n";
 #[cfg(windows)]
-pub(crate) const EOL: &str = "\r\n";
+#[doc(hidden)]
+pub const __EOL: &str = "\r\n";
 
 static DEFAULT_LOGGER: OnceCell<ArcSwap<Logger>> = OnceCell::new();
 
@@ -646,6 +695,8 @@ pub fn log_crate_proxy() -> &'static LogCrateProxy {
     &PROXY
 }
 
+static IS_TEARING_DOWN: AtomicBool = AtomicBool::new(false);
+
 fn flush_default_logger_at_exit() {
     // Rust never calls `drop` for static variables.
     //
@@ -653,6 +704,7 @@ fn flush_default_logger_at_exit() {
     // once at the program exit, thus we don't lose the last logs.
 
     extern "C" fn handler() {
+        IS_TEARING_DOWN.store(true, Ordering::SeqCst);
         if let Some(default_logger) = DEFAULT_LOGGER.get() {
             default_logger.load().flush()
         }
@@ -684,6 +736,12 @@ fn flush_default_logger_at_exit() {
 }
 
 fn default_error_handler(from: impl AsRef<str>, error: Error) {
+    if let Error::Multiple(errs) = error {
+        errs.into_iter()
+            .for_each(|err| default_error_handler(from.as_ref(), err));
+        return;
+    }
+
     let date = chrono::Local::now()
         .format("%Y-%m-%d %H:%M:%S.%3f")
         .to_string();

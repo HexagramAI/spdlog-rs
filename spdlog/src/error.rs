@@ -6,10 +6,10 @@ use std::{
 };
 
 use atomic::Atomic;
-use static_assertions::const_assert;
 use thiserror::Error;
 
 pub use crate::env_level::EnvLevelError;
+use crate::utils::const_assert;
 #[cfg(feature = "multi-thread")]
 use crate::{sink::Task, RecordOwned};
 
@@ -91,6 +91,22 @@ pub enum Error {
     #[cfg(feature = "multi-thread")]
     #[error("failed to send message to channel: {0}")]
     SendToChannel(SendToChannelError, SendToChannelErrorDropped),
+
+    /// The variant returned by [`runtime_pattern!`] when the
+    /// pattern is failed to be built at runtime.
+    ///
+    /// [`runtime_pattern!`]: crate::formatter::runtime_pattern
+    #[cfg(feature = "runtime-pattern")]
+    #[error("failed to build pattern at runtime: {0}")]
+    BuildPattern(BuildPatternError),
+
+    /// This variant returned when multiple errors occurred.
+    #[error("{0:?}")]
+    Multiple(Vec<Error>),
+
+    #[cfg(test)]
+    #[error("{0}")]
+    __ForInternalTestsUseOnly(i32),
 }
 
 /// This error type contains a variety of possible invalid arguments.
@@ -180,6 +196,26 @@ pub enum SendToChannelErrorDropped {
     Flush,
 }
 
+impl Error {
+    pub(crate) fn push_err<T>(result: Result<T>, new: Self) -> Result<T> {
+        match result {
+            Ok(_) => Err(new),
+            Err(Self::Multiple(mut errors)) => {
+                errors.push(new);
+                Err(Self::Multiple(errors))
+            }
+            Err(prev) => Err(Error::Multiple(vec![prev, new])),
+        }
+    }
+
+    pub(crate) fn push_result<T, N>(result: Result<T>, new: Result<N>) -> Result<T> {
+        match new {
+            Ok(_) => result,
+            Err(err) => Self::push_err(result, err),
+        }
+    }
+}
+
 #[cfg(feature = "multi-thread")]
 impl Error {
     #[must_use]
@@ -214,6 +250,13 @@ impl SendToChannelErrorDropped {
     }
 }
 
+/// This error indicates that an error occurred while building a pattern at
+/// compile-time.
+#[cfg(feature = "runtime-pattern")]
+#[derive(Error, Debug)]
+#[error("{0}")]
+pub struct BuildPatternError(pub(crate) spdlog_internal::pattern_parser::Error);
+
 /// The result type of this crate.
 pub type Result<T> = result::Result<T, Error>;
 
@@ -222,3 +265,27 @@ pub type ErrorHandler = fn(Error);
 
 const_assert!(Atomic::<ErrorHandler>::is_lock_free());
 const_assert!(Atomic::<Option<ErrorHandler>>::is_lock_free());
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn push_err() {
+        macro_rules! make_err {
+            ( $($inputs:tt)+ ) => {
+                Error::__ForInternalTestsUseOnly($($inputs)*)
+            };
+        }
+
+        assert!(matches!(
+            Error::push_err(Ok(()), make_err!(1)),
+            Err(make_err!(1))
+        ));
+
+        assert!(matches!(
+            Error::push_err::<()>(Err(make_err!(1)), make_err!(2)),
+            Err(Error::Multiple(v)) if matches!(v[..], [make_err!(1), make_err!(2)])
+        ));
+    }
+}
