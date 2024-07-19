@@ -262,7 +262,7 @@ impl<'a> TimeDate<'a> {
     }
 
     pub fn microsecond(&self) -> u32 {
-        self.nanosecond / 1000
+        (self.nanosecond / 1000) % 1000
     }
 
     #[must_use]
