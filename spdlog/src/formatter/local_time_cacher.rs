@@ -261,6 +261,10 @@ impl<'a> TimeDate<'a> {
         self.millisecond
     }
 
+    pub fn microsecond(&self) -> u32 {
+        self.nanosecond / 1000
+    }
+
     #[must_use]
     pub(crate) fn hour12_str(&self) -> Arc<String> {
         self.cached
