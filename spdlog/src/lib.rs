@@ -291,7 +291,7 @@ pub mod sink;
 mod source_location;
 #[doc(hidden)]
 pub mod string_buf;
-mod sync;
+pub mod sync;
 pub mod terminal_style;
 #[cfg(test)]
 mod test_utils;
@@ -323,7 +323,7 @@ use std::{
     panic,
     result::Result as StdResult,
 };
-
+use std::time::SystemTime;
 use cfg_if::cfg_if;
 use error::EnvLevelError;
 use sink::{Sink, StdStream, StdStreamSink};
@@ -790,6 +790,27 @@ pub fn __log(
     };
 
     let mut builder = Record::builder(level, payload).source_location(srcloc);
+    if let Some(logger_name) = logger.name() {
+        builder = builder.logger_name(logger_name);
+    }
+    logger.log(&builder.build());
+}
+
+#[doc(hidden)]
+pub fn __logt(
+    logger: &Logger,
+    level: Level,
+    srcloc: Option<SourceLocation>,
+    time: SystemTime,
+    fmt_args: std::fmt::Arguments,
+) {
+    // use `Cow` to avoid allocation as much as we can
+    let payload: std::borrow::Cow<str> = match fmt_args.as_str() {
+        Some(literal_str) => literal_str.into(), // no format arguments, so it is a `&'static str`
+        None => fmt_args.to_string().into(),
+    };
+
+    let mut builder = crate::record::RecordBuilder::new_with_time(level, time, payload).source_location(srcloc);
     if let Some(logger_name) = logger.name() {
         builder = builder.logger_name(logger_name);
     }

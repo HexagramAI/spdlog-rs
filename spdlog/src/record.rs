@@ -53,6 +53,22 @@ impl<'a> Record<'a> {
         }
     }
 
+    pub(crate) fn new_with_time<S>(level: Level, time: SystemTime, payload: S) -> Record<'a>
+    where
+      S: Into<Cow<'a, str>>,
+    {
+        Record {
+            logger_name: None,
+            payload: payload.into(),
+            inner: Cow::Owned(RecordInner {
+                level,
+                source_location: None,
+                time,
+                tid: get_current_tid(),
+            }),
+        }
+    }
+
     #[must_use]
     pub(crate) fn builder<S>(level: Level, payload: S) -> RecordBuilder<'a>
     where
@@ -240,6 +256,15 @@ impl<'a> RecordBuilder<'a> {
     {
         Self {
             record: Record::new(level, payload),
+        }
+    }
+
+    pub(crate) fn new_with_time<S>(level: Level, time: SystemTime, payload: S) -> Self
+    where
+      S: Into<Cow<'a, str>>,
+    {
+        Self {
+            record: Record::new_with_time(level, time, payload),
         }
     }
 

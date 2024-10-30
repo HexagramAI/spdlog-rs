@@ -56,7 +56,7 @@ mod full_formatter;
 mod journald_formatter;
 #[cfg(feature = "serde_json")]
 mod json_formatter;
-mod local_time_cacher;
+pub mod local_time_cacher;
 mod pattern_formatter;
 
 use std::ops::Range;
