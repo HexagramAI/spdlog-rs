@@ -20,21 +20,23 @@ where
 }
 
 #[derive(Clone)]
-pub(crate) struct LocalTimeCacher {
+pub struct LocalTimeCacher {
     stored_key: u64,
     cache_values: Option<CacheValues>,
 }
 
-pub(crate) struct TimeDate<'a> {
+pub struct TimeDate<'a> {
     cached: &'a mut CacheValues,
     nanosecond: u32,
     millisecond: u32,
+    microsecond: u32,
 }
 
 #[derive(Clone, Eq, PartialEq)]
 struct CacheValues {
     local_time: DateTime<Local>,
     full_second_str: Option<String>,
+    full_second_noyear_str: Option<String>,
     year: Option<i32>,
     year_str: Option<String>,
     year_short_str: Option<String>,
@@ -65,7 +67,7 @@ pub(crate) struct MultiName<T> {
 
 impl LocalTimeCacher {
     #[must_use]
-    fn new() -> LocalTimeCacher {
+    pub fn new() -> LocalTimeCacher {
         LocalTimeCacher {
             stored_key: 0,
             cache_values: None,
@@ -73,10 +75,13 @@ impl LocalTimeCacher {
     }
 
     #[must_use]
-    pub(crate) fn get(&mut self, system_time: SystemTime) -> TimeDate {
+    pub fn get(&mut self, system_time: SystemTime) -> TimeDate {
         let since_epoch = system_time.duration_since(SystemTime::UNIX_EPOCH).unwrap();
         let nanosecond = since_epoch.subsec_nanos();
-        let millisecond = nanosecond / 1_000_000;
+        // let millisecond = nanosecond / 1_000_000;
+        let microsecond = nanosecond / 1_000;
+        let millisecond = microsecond / 1_000;
+        let microsecond = microsecond % 1_000;
 
         let cache_key = since_epoch.as_secs(); // Unix timestamp
         if self.cache_values.is_none() || self.stored_key != cache_key {
@@ -88,6 +93,7 @@ impl LocalTimeCacher {
             cached: self.cache_values.as_mut().unwrap(),
             nanosecond,
             millisecond,
+            microsecond,
         }
     }
 }
@@ -136,6 +142,21 @@ impl TimeDate<'_> {
             ));
         }
         self.cached.full_second_str.as_deref().unwrap()
+    }
+
+    pub fn full_second_noyear_str(&mut self) -> &str {
+        if self.cached.full_second_noyear_str.is_none() {
+            // `local_time.format("%Y-%m-%d %H:%M:%S")` is slower than this way
+            self.cached.full_second_noyear_str = Some(format!(
+                "{:02}-{:02} {:02}:{:02}:{:02}",
+                self.month(),
+                self.day(),
+                self.hour(),
+                self.minute(),
+                self.second()
+            ));
+        }
+        self.cached.full_second_noyear_str.as_deref().unwrap()
     }
 
     impl_cache_fields_getter! {
@@ -233,8 +254,15 @@ impl TimeDate<'_> {
     }
 
     #[must_use]
-    pub(crate) fn millisecond(&mut self) -> u32 {
+    #[inline(always)]
+    pub fn millisecond(&mut self) -> u32 {
         self.millisecond
+    }
+
+    #[inline(always)]
+    pub fn microsecond(&self) -> u32 {
+        // (self.nanosecond / 1000) % 1000
+        self.microsecond
     }
 
     #[must_use]
@@ -292,6 +320,7 @@ impl CacheValues {
         CacheValues {
             local_time: system_time.into(),
             full_second_str: None,
+            full_second_noyear_str: None,
             year: None,
             year_str: None,
             year_short_str: None,
@@ -320,6 +349,7 @@ struct TimeDateLocked<'a> {
     cached: SpinMutexGuard<'a, LocalTimeCacher>,
     nanosecond: u32,
     millisecond: u32,
+    microsecond: u32,
 }
 
 pub(crate) struct TimeDateLazyLocked<'a> {
@@ -338,11 +368,12 @@ impl TimeDateLazyLocked<'_> {
         let locked = self.locked.get_or_insert_with(|| {
             let mut cached = LOCAL_TIME_CACHER.lock();
             let time_date = cached.get(self.time);
-            let (nanosecond, millisecond) = (time_date.nanosecond, time_date.millisecond);
+            let (nanosecond, millisecond, microsecond) = (time_date.nanosecond, time_date.millisecond, time_date.microsecond);
             TimeDateLocked {
                 cached,
                 nanosecond,
                 millisecond,
+                microsecond,
             }
         });
 
@@ -350,6 +381,7 @@ impl TimeDateLazyLocked<'_> {
             cached: locked.cached.cache_values.as_mut().unwrap(),
             nanosecond: locked.nanosecond,
             millisecond: locked.millisecond,
+            microsecond: locked.microsecond,
         }
     }
 }

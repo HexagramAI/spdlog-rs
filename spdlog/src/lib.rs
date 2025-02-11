@@ -326,6 +326,7 @@ use std::{
     result::Result as StdResult,
 };
 
+use std::time::SystemTime;
 use cfg_if::cfg_if;
 use error::EnvLevelError;
 use sink::{Sink, StdStreamSink};
@@ -791,6 +792,23 @@ pub fn __log(
         .map(Cow::Borrowed) // No format arguments, so it is a `&'static str`
         .unwrap_or_else(|| Cow::Owned(fmt_args.to_string()));
     let record = Record::new(level, payload, srcloc, logger.name());
+    logger.log(&record);
+}
+
+#[doc(hidden)]
+pub fn __logt(
+    logger: &Logger,
+    level: Level,
+    srcloc: Option<SourceLocation>,
+    time: SystemTime,
+    fmt_args: fmt::Arguments,
+) {
+    // Use `Cow` to avoid allocation as much as we can
+    let payload: Cow<str> = fmt_args
+      .as_str()
+      .map(Cow::Borrowed) // No format arguments, so it is a `&'static str`
+      .unwrap_or_else(|| Cow::Owned(fmt_args.to_string()));
+    let record = Record::new_with_time(level, time, payload, srcloc, logger.name());
     logger.log(&record);
 }
 

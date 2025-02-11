@@ -55,6 +55,25 @@ impl<'a> Record<'a> {
         }
     }
 
+    pub(crate) fn new_with_time(
+        level: Level,
+        time: SystemTime,
+        payload: impl Into<Cow<'a, str>>,
+        srcloc: Option<SourceLocation>,
+        logger_name: Option<&'a str>,
+    ) -> Record<'a> {
+        Record {
+            logger_name: logger_name.map(Cow::Borrowed),
+            payload: payload.into(),
+            inner: Cow::Owned(RecordInner {
+                level,
+                source_location: srcloc,
+                time,
+                tid: get_current_tid(),
+            }),
+        }
+    }
+
     /// Creates a [`RecordOwned`] that doesn't have lifetimes.
     #[must_use]
     pub fn to_owned(&self) -> RecordOwned {
