@@ -634,7 +634,8 @@ impl LoggerBuilder {
         self.build_inner(self.preset_level(false))
     }
 
-    pub(crate) fn build_default(&mut self) -> Result<Logger> {
+    /// Builds a default [`Logger`].
+    pub fn build_default(&mut self) -> Result<Logger> {
         self.build_inner(self.preset_level(true))
     }
 
